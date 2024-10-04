@@ -1,65 +1,104 @@
-import React, { useState, useEffect } from "react"
+// src/App.jsx
+import React, { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Pencil, Trash2 } from "lucide-react"
 
+const API_URL = "http://localhost:5000/todos"
+
+const fetchTasks = async () => {
+  const response = await fetch(API_URL)
+  if (!response.ok) {
+    throw new Error("Network response was not ok")
+  }
+  return response.json()
+}
+
 export default function App() {
-  const [tasks, setTasks] = useState([])
   const [newTask, setNewTask] = useState("")
   const [editingTask, setEditingTask] = useState(null)
 
-  useEffect(() => {
-    const storedTasks = localStorage.getItem("tasks")
-    if (storedTasks) {
-      setTasks(JSON.parse(storedTasks))
-    }
-  }, [])
+  const { data: tasks = [], refetch } = useQuery(["tasks"], fetchTasks)
 
-  useEffect(() => {
-    localStorage.setItem("tasks", JSON.stringify(tasks))
-  }, [tasks])
-
-  const addTask = (e) => {
+  const addTask = async (e) => {
     e.preventDefault()
     if (newTask.trim() === "") return
 
-    const currentDateTime = new Date()
-    const formattedDate = currentDateTime.toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric"
-    })
-    const formattedTime = currentDateTime.toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit"
-    })
+    const newTaskObj = {
+      title: newTask,
+      status: false // Set default status to false
+    }
+
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(newTaskObj)
+      })
+
+      setNewTask("")
+      refetch()
+    } catch (error) {
+      console.error("Error adding task:", error)
+      // Handle error, e.g., show an error message to the user
+    }
+  }
+
+  const deleteTask = async (id) => {
+    try {
+      await fetch(`${API_URL}/${id}`, {
+        method: "DELETE"
+      })
+      refetch()
+    } catch (error) {
+      console.error("Error deleting task:", error)
+      // Handle error, e.g., show an error message to the user
+    }
+  }
+
+  const toggleComplete = async (id) => {
+    const task = tasks.find((task) => task.id === id)
+    if (!task) return
+
+    try {
+      await fetch(`${API_URL}/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ title: task.title, status: !task.status }) // Only send title and status
+      })
+      refetch()
+    } catch (error) {
+      console.error("Error toggling task completion:", error)
+      // Handle error, e.g., show an error message to the user
+    }
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
 
     if (editingTask) {
-      setTasks(
-        tasks.map((task) =>
-          task.id === editingTask.id
-            ? { ...task, title: newTask, date: formattedDate, time: formattedTime }
-            : task
-        )
-      )
-      setEditingTask(null)
-    } else {
-      const newTaskObj = {
-        id: Date.now(),
-        title: newTask,
-        completed: false,
-        date: formattedDate,
-        time: formattedTime
+      // If editingTask is not null, it means we're editing
+      try {
+        await fetch(`${API_URL}/${editingTask.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ title: newTask, status: editingTask.status })
+        })
+        setEditingTask(null)
+        setNewTask("")
+        refetch()
+      } catch (error) {
+        console.error("Error updating task:", error)
       }
-      setTasks([...tasks, newTaskObj])
+    } else {
+      // Otherwise, we're adding a new task
+      addTask(e) // Call the addTask function for new tasks
     }
-    setNewTask("")
-  }
-
-  const deleteTask = (id) => {
-    setTasks(tasks.filter((task) => task.id !== id))
-  }
-
-  const toggleComplete = (id) => {
-    setTasks(tasks.map((task) => (task.id === id ? { ...task, completed: !task.completed } : task)))
   }
 
   const startEditing = (task) => {
@@ -72,20 +111,15 @@ export default function App() {
     setNewTask("")
   }
 
-  const ongoingTasks = tasks
-    .filter((task) => !task.completed)
-    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-
-  const completedTasks = tasks
-    .filter((task) => task.completed)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+  const ongoingTasks = tasks.filter((task) => !task.status) // Filter by 'status'
+  const completedTasks = tasks.filter((task) => task.status) // Filter by 'status'
 
   return (
     <div className="min-h-screen px-4 py-8 bg-gray-100 sm:px-6 lg:px-8">
       <div className="max-w-md mx-auto overflow-hidden bg-white rounded-lg shadow-md">
         <div className="px-4 py-5 sm:p-6">
           <h1 className="mb-4 text-4xl text-center text-gray-900">Task Management</h1>
-          <form onSubmit={addTask} className="mb-4">
+          <form onSubmit={handleSubmit} className="mb-4">
             <label htmlFor="task" className="block text-sm font-medium text-gray-700">
               Title
             </label>
@@ -159,22 +193,27 @@ export default function App() {
     </div>
   )
 }
-
 function TaskItem({ task, onDelete, onToggle, onEdit }) {
   return (
     <div className="flex items-center justify-between p-4 rounded-md bg-[#D0D0D0]">
       <div className="flex items-start space-x-2">
         <div>
           <span
-            className={`text-sm ${
-              task.completed ? "line-through text-[#000000]" : "text-gray-900"
-            }`}
+            className={`text-sm ${task.status ? "line-through text-[#000000]" : "text-gray-900"}`}
           >
             {task.title}
           </span>
           <br />
           <span className="text-xs text-[#000000]">
-            {task.date} {task.time}
+            {new Date(task.last_update).toLocaleDateString("en-GB", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric"
+            })}{" "}
+            {new Date(task.last_update).toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit"
+            })}
           </span>
         </div>
         <div>
@@ -195,9 +234,9 @@ function TaskItem({ task, onDelete, onToggle, onEdit }) {
         </button>
         <input
           type="checkbox"
-          checked={task.completed}
+          checked={task.status}
           onChange={() => onToggle(task.id)}
-          className="h-4 w-4 text-[#33363F]  border-[#33363F] rounded"
+          className="h-4 w-4 text-[#33363F]  border-[#33363F] rounded"
         />
       </div>
     </div>
